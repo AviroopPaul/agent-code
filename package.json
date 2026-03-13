@@ -1,0 +1,47 @@
+{
+  "name": "agent-code",
+  "productName": "Agent Code",
+  "description": "Electron desktop client for Codex app-server with project-grouped threads, tool-call rendering, approvals, and Markdown transcript support.",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:main\" \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:main": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist-electron --out-extension:.js=.cjs --external:electron --watch",
+    "dev:renderer": "vite",
+    "dev:electron": "wait-on dist-electron/main.cjs tcp:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron --no-sandbox .",
+    "build": "npm run build:main && npm run build:renderer",
+    "build:main": "esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --target=node22 --outdir=dist-electron --out-extension:.js=.cjs --external:electron",
+    "build:renderer": "tsc -b && vite build",
+    "codegen:protocol": "mkdir -p src/shared/protocol && codex app-server generate-ts --out src/shared/protocol",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-icons": "^5.6.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.0",
+    "concurrently": "^9.2.1",
+    "electron": "^41.0.2",
+    "esbuild": "^0.27.4",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.56.1",
+    "vite": "^8.0.0",
+    "wait-on": "^9.0.4"
+  }
+}
