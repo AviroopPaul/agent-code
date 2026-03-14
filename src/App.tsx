@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { LuChevronDown, LuChevronRight, LuFolder, LuFolderPlus, LuPanelLeftClose, LuPanelLeftOpen } from 'react-icons/lu';
+import {
+  LuArrowUp,
+  LuChevronDown,
+  LuChevronRight,
+  LuFolder,
+  LuFolderPlus,
+  LuPanelLeftClose,
+  LuPanelLeftOpen,
+  LuPlus,
+  LuSparkles,
+  LuSettings2,
+  LuSlidersHorizontal,
+  LuSquarePen,
+} from 'react-icons/lu';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -14,9 +27,26 @@ import type { ProjectThread } from './shared/bridge';
 
 const EFFORT_PRIORITY: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
 const RECENT_PROJECTS_KEY = 'agent-code:recent-projects';
+const SELECTED_AGENT_KEY = 'agent-code:selected-agent';
+const AGENT_OPTIONS = [
+  { id: 'codex', label: 'Codex', icon: 'https://openai.com/favicon.ico', available: true },
+  { id: 'claude', label: 'Claude Code', icon: 'https://claude.com/favicon.ico', available: false },
+  { id: 'gemini', label: 'Gemini CLI', icon: 'https://www.gstatic.com/marketing-cms/assets/images/7e/a4/253561a944f4a8f5e6dec4f5f26f/gemini.webp=s48-fcrop64=1,00000000ffffffff-rw', available: false },
+  { id: 'opencode', label: 'Opencode', icon: 'https://opencode.ai/favicon.ico', available: false },
+] as const;
 
-function formatThreadName(thread: ProjectThread): string {
-  return thread.name?.trim() || thread.preview?.trim() || 'New chat';
+type ThreadOrganizeMode = 'byProject' | 'chronological';
+type ThreadSortMode = 'created' | 'updated';
+type ThreadScopeMode = 'all' | 'relevant';
+type ComposerImage = { id: string; url: string };
+
+function clampThreadTitle(title: string, maxWords = 5): string {
+  const words = title.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) {
+    return title;
+  }
+
+  return `${words.slice(0, maxWords).join(' ')}…`;
 }
 
 function formatWorkspaceName(workspacePath: string): string {
@@ -30,10 +60,28 @@ function formatWorkspaceName(workspacePath: string): string {
 }
 
 function formatUpdatedAt(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMinutes = Math.max(0, Math.floor(diffMs / (1000 * 60)));
+  const diffHours = Math.floor(diffMinutes / 60);
+
+  if (diffMinutes < 1) {
+    return 'now';
+  }
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m`;
+  }
+
+  if (diffHours < 24) {
+    return `${diffHours}h`;
+  }
+
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
-  }).format(timestamp * 1000);
+  }).format(date);
 }
 
 function isToolEntry(entry: TranscriptEntry): boolean {
@@ -76,6 +124,54 @@ function humanizeEffort(effort: ReasoningEffort): string {
 function SidebarToggleIcon({ open }: { open: boolean }) {
   const Icon = open ? LuPanelLeftClose : LuPanelLeftOpen;
   return <Icon aria-hidden="true" size={20} />;
+}
+
+function LoaderDot() {
+  return <span aria-hidden="true" className="inline-loader" />;
+}
+
+function PickerMenu<T extends string>({
+  label,
+  value,
+  options,
+  open,
+  onToggle,
+  onSelect,
+  menuRef,
+}: {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  open: boolean;
+  onToggle: () => void;
+  onSelect: (value: T) => void;
+  menuRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const selected = options.find((option) => option.value === value);
+
+  return (
+    <div className="picker-menu" ref={menuRef}>
+      <button className={`picker-trigger ${open ? 'picker-trigger-open' : ''}`} onClick={onToggle} type="button">
+        <span className="picker-trigger-label">{selected?.label ?? label}</span>
+        <LuChevronDown aria-hidden="true" size={14} />
+      </button>
+      {open ? (
+        <div className="picker-popover">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              className={`picker-option ${option.value === value ? 'picker-option-active' : ''}`}
+              onClick={() => onSelect(option.value)}
+              type="button"
+            >
+              <span>{option.label}</span>
+              {option.value === value ? <span className="picker-option-check">✓</span> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function MarkdownContent({ children }: { children: string }) {
@@ -361,32 +457,47 @@ function RawResponseBody({ item }: { item: ResponseItem }) {
 }
 
 function UserInputContent({ content }: { content: UserInput[] }) {
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const imageItems = content.filter((item) => item.type === 'image' || item.type === 'localImage');
+  const otherItems = content.filter((item) => item.type !== 'image' && item.type !== 'localImage');
+
   return (
-    <div className="user-input-stack">
-      {content.map((item, index) => {
-        if (item.type === 'text') {
+    <>
+      <div className="user-input-stack">
+        {imageItems.length > 0 ? (
+          <div className="user-image-strip">
+            {imageItems.map((item, index) => {
+              const source = renderImageSource(item.type === 'image' ? item.url : item.path);
+              return (
+                <button className="user-image-button" key={`${item.type}-${index}`} onClick={() => setSelectedImage(source)} type="button">
+                  <img alt="User supplied" className="user-message-image" src={source} />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {otherItems.map((item, index) => {
+          if (item.type === 'text') {
+            return (
+              <div className="markdown-body" key={`${item.type}-${index}`}>
+                <MarkdownContent>{item.text}</MarkdownContent>
+              </div>
+            );
+          }
+
           return (
-            <div className="markdown-body" key={`${item.type}-${index}`}>
-              <MarkdownContent>{item.text}</MarkdownContent>
-            </div>
+            <span className="message-chip" key={`${item.type}-${index}`}>
+              {item.name}
+            </span>
           );
-        }
-
-        if (item.type === 'image') {
-          return <img alt="User supplied" className="message-image" key={`${item.type}-${index}`} src={renderImageSource(item.url)} />;
-        }
-
-        if (item.type === 'localImage') {
-          return <img alt="User supplied" className="message-image" key={`${item.type}-${index}`} src={renderImageSource(item.path)} />;
-        }
-
-        return (
-          <span className="message-chip" key={`${item.type}-${index}`}>
-            {item.name}
-          </span>
-        );
-      })}
-    </div>
+        })}
+      </div>
+      {selectedImage ? (
+        <button className="image-modal" onClick={() => setSelectedImage(null)} type="button">
+          <img alt="Expanded user supplied" className="image-modal-content" src={selectedImage} />
+        </button>
+      ) : null}
+    </>
   );
 }
 
@@ -717,17 +828,6 @@ function TranscriptRow({ entry }: { entry: TranscriptEntry }) {
     );
   }
 
-  if (entry.kind === 'reasoning') {
-    return (
-      <div className="msg msg-ai">
-        <div className="msg-reasoning">
-          <span className="reasoning-label">Thinking</span>
-          <pre>{entry.body || ' '}</pre>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="msg msg-ai">
       <div className="msg-bubble msg-bubble-ai">
@@ -794,9 +894,34 @@ export default function App() {
   const [projectThreads, setProjectThreads] = useState<Record<string, ProjectThread[]>>({});
   const [loadingProjects, setLoadingProjects] = useState<Record<string, boolean>>({});
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+  const [selectedAgent, setSelectedAgent] = useState<(typeof AGENT_OPTIONS)[number]['id'] | null>(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    try {
+      const stored = window.localStorage.getItem(SELECTED_AGENT_KEY);
+      return AGENT_OPTIONS.some((agent) => agent.id === stored && agent.available)
+        ? (stored as (typeof AGENT_OPTIONS)[number]['id'])
+        : null;
+    } catch {
+      return null;
+    }
+  });
+  const [composerImages, setComposerImages] = useState<ComposerImage[]>([]);
+  const [selectedComposerImage, setSelectedComposerImage] = useState<string | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [effortMenuOpen, setEffortMenuOpen] = useState(false);
+  const [organizeMode, setOrganizeMode] = useState<ThreadOrganizeMode>('byProject');
+  const [sortMode, setSortMode] = useState<ThreadSortMode>('updated');
+  const [scopeMode, setScopeMode] = useState<ThreadScopeMode>('all');
 
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const effortMenuRef = useRef<HTMLDivElement | null>(null);
 
   const codex = typeof window !== 'undefined' ? window.codex : undefined;
 
@@ -813,9 +938,35 @@ export default function App() {
     () => transcriptOrder.map((id) => transcript[id]).filter(Boolean),
     [transcript, transcriptOrder],
   );
+  const displayThreadName = useMemo(() => clampThreadTitle(currentThreadName), [currentThreadName]);
+  const selectedAgentLabel = useMemo(
+    () => AGENT_OPTIONS.find((agent) => agent.id === selectedAgent)?.label ?? 'Codex',
+    [selectedAgent],
+  );
 
   const isTurnActive = currentTurnId !== null && turnStatus !== 'completed';
-  const canSubmit = Boolean(threadId) && !connecting && draft.trim().length > 0;
+  const canSubmit = Boolean(threadId) && !connecting && (draft.trim().length > 0 || composerImages.length > 0);
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  const visibleProjects = useMemo(
+    () => (scopeMode === 'relevant' && workspacePath ? recentProjects.filter((projectPath) => projectPath === workspacePath) : recentProjects),
+    [recentProjects, scopeMode, workspacePath],
+  );
+  const chronologicalThreads = useMemo(
+    () =>
+      visibleProjects
+        .flatMap((projectPath) =>
+          (projectThreads[projectPath] ?? []).map((thread) => ({
+            projectPath,
+            thread,
+          })),
+        )
+        .sort((left, right) =>
+          sortMode === 'created'
+            ? right.thread.createdAt - left.thread.createdAt
+            : right.thread.updatedAt - left.thread.updatedAt,
+        ),
+    [projectThreads, sortMode, visibleProjects],
+  );
 
   useEffect(() => {
     const viewport = messageScrollRef.current;
@@ -823,6 +974,28 @@ export default function App() {
       viewport.scrollTop = viewport.scrollHeight;
     }
   }, [transcriptEntries.length, approvals.length, isTurnActive]);
+
+  useEffect(() => {
+    if (!filtersOpen && !modelMenuOpen && !effortMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent): void {
+      const target = event.target as Node;
+      if (!filterMenuRef.current?.contains(target)) {
+        setFiltersOpen(false);
+      }
+      if (!modelMenuRef.current?.contains(target)) {
+        setModelMenuOpen(false);
+      }
+      if (!effortMenuRef.current?.contains(target)) {
+        setEffortMenuOpen(false);
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [effortMenuOpen, filtersOpen, modelMenuOpen]);
 
   useEffect(() => {
     if (!effortOptions.length) {
@@ -846,14 +1019,29 @@ export default function App() {
   }, [recentProjects]);
 
   useEffect(() => {
-    if (!codex) {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (selectedAgent) {
+      window.localStorage.setItem(SELECTED_AGENT_KEY, selectedAgent);
+      return;
+    }
+
+    window.localStorage.removeItem(SELECTED_AGENT_KEY);
+  }, [selectedAgent]);
+
+  useEffect(() => {
+    if (!codex || selectedAgent !== 'codex') {
       setConnecting(false);
-      setErrorMessage('This renderer is not running inside Electron.');
+      if (!codex) {
+        setErrorMessage('This renderer is not running inside Electron.');
+      }
       return;
     }
 
     return codex.subscribe((event) => handleBridgeEvent(event));
-  }, [codex, handleBridgeEvent]);
+  }, [codex, handleBridgeEvent, selectedAgent]);
 
   function rememberProject(projectPath: string): void {
     setRecentProjects((currentProjects) => [projectPath, ...currentProjects.filter((entry) => entry !== projectPath)]);
@@ -896,7 +1084,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!codex) {
+    if (!codex || selectedAgent !== 'codex') {
       return;
     }
 
@@ -940,7 +1128,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [codex, createSession, setWorkspace, startBackend]);
+  }, [codex, createSession, selectedAgent, setWorkspace, startBackend]);
 
   useEffect(() => {
     if (!workspacePath || !codex) {
@@ -967,18 +1155,21 @@ export default function App() {
   async function submitTurn(event?: React.FormEvent<HTMLFormElement>): Promise<void> {
     event?.preventDefault();
 
-    if (!codex || !threadId || !workspacePath || !draft.trim()) {
+    if (!codex || !threadId || !workspacePath || (!draft.trim() && composerImages.length === 0)) {
       return;
     }
 
     const nextDraft = draft.trim();
+    const nextImages = composerImages;
     setDraft('');
+    setComposerImages([]);
 
     try {
       const response = await codex.sendTurn({
         threadId,
         cwd: workspacePath,
         text: nextDraft,
+        images: nextImages.map((image) => image.url),
         model: selectedModel,
         effort: effortOptions.length ? selectedEffort : null,
       });
@@ -986,6 +1177,7 @@ export default function App() {
       beginTurn(response);
     } catch {
       setDraft(nextDraft);
+      setComposerImages(nextImages);
     }
 
     composerRef.current?.focus();
@@ -1075,6 +1267,45 @@ export default function App() {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
   }
 
+  function handleComposerPaste(event: React.ClipboardEvent<HTMLTextAreaElement>): void {
+    const imageFiles = Array.from(event.clipboardData.items)
+      .filter((item) => item.type.startsWith('image/'))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+
+    if (imageFiles.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    void Promise.all(
+      imageFiles.map(
+        (file) =>
+          new Promise<ComposerImage>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () =>
+              resolve({
+                id: `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                url: String(reader.result),
+              });
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          }),
+      ),
+    )
+      .then((images) => {
+        setComposerImages((current) => [...current, ...images]);
+      })
+      .catch(() => {
+        // Ignore failed clipboard reads and leave the draft unchanged.
+      });
+  }
+
+  function removeComposerImage(imageId: string): void {
+    setComposerImages((current) => current.filter((image) => image.id !== imageId));
+  }
+
   function toggleProjectCollapsed(projectPath: string): void {
     setCollapsedProjects((current) => ({
       ...current,
@@ -1082,27 +1313,156 @@ export default function App() {
     }));
   }
 
+  function handleAgentSelect(agentId: (typeof AGENT_OPTIONS)[number]['id']): void {
+    if (agentId !== 'codex') {
+      return;
+    }
+
+    setErrorMessage(null);
+    setConnecting(true);
+    setSelectedAgent(agentId);
+  }
+
+  function handleChangeAgent(): void {
+    setSelectedAgent(null);
+    setConnecting(false);
+    setErrorMessage(null);
+    setDraft('');
+    setComposerImages([]);
+    resetTranscript();
+  }
+
+  if (!selectedAgent) {
+    return (
+      <div className="agent-select-screen">
+        <div className="agent-select-card">
+          <div className="agent-select-kicker">Agent Code</div>
+          <h1>Select your agent</h1>
+          <div className="agent-select-grid">
+            {AGENT_OPTIONS.map((agent) => (
+              <button
+                key={agent.id}
+                className={`agent-option ${agent.available ? '' : 'agent-option-disabled'}`}
+                onClick={() => handleAgentSelect(agent.id)}
+                type="button"
+              >
+                <img alt="" className="agent-option-icon" src={agent.icon} />
+                <div className="agent-option-title">{agent.label}</div>
+                {!agent.available ? <div className="agent-option-subtitle">Coming soon</div> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (selectedAgent === 'codex' && connecting && !threadId && !errorMessage) {
+    return (
+      <div className="agent-select-screen">
+        <div className="agent-select-card agent-connecting-card">
+          <img alt="" className="agent-option-icon" src={AGENT_OPTIONS[0].icon} />
+          <h1>Connecting to Codex</h1>
+          <div className="spinner" />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="app">
+    <div className={`app ${isMac ? 'platform-macos' : ''}`}>
       <div className={`app-shell ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
         <aside className="sidebar">
           <div className="sidebar-header">
-            <div className="sidebar-title">Agent Code</div>
+            <div className="sidebar-header-spacer" />
           </div>
 
-          <div className="sidebar-actions">
-            <button className="btn btn-sm btn-ghost" disabled={connecting} onClick={() => void chooseWorkspace()} type="button">
-              <LuFolderPlus aria-hidden="true" size={18} />
-              Add a new project
+          <div className="sidebar-nav">
+            <button
+              className="sidebar-nav-item"
+              disabled={connecting}
+              onClick={() => void (workspacePath ? startNewChatForProject(workspacePath) : chooseWorkspace())}
+              type="button"
+            >
+              <LuSquarePen aria-hidden="true" size={16} />
+              <span>New thread</span>
             </button>
           </div>
 
           <div className="chat-list">
-            <div className="sidebar-section-label">Threads</div>
-            {recentProjects.length === 0 ? <div className="sidebar-empty">No projects yet.</div> : null}
-            {recentProjects.map((projectPath) => {
+            <div className="sidebar-section-row">
+              <div className="sidebar-section-label">Threads</div>
+              <div className="sidebar-section-tools" ref={filterMenuRef}>
+                <button className="sidebar-icon-btn" disabled={connecting} onClick={() => void chooseWorkspace()} title="Add project" type="button">
+                  <LuFolderPlus aria-hidden="true" size={15} />
+                </button>
+                <button className={`sidebar-icon-btn ${filtersOpen ? 'sidebar-icon-btn-active' : ''}`} onClick={() => setFiltersOpen((value) => !value)} title="Filter threads" type="button">
+                  <LuSlidersHorizontal aria-hidden="true" size={15} />
+                </button>
+                {filtersOpen ? (
+                  <div className="filter-menu">
+                    <div className="filter-menu-section">
+                      <div className="filter-menu-label">Organize</div>
+                      <button className="filter-menu-item" onClick={() => setOrganizeMode('byProject')} type="button">
+                        <span>By project</span>
+                        {organizeMode === 'byProject' ? <span className="filter-menu-check">✓</span> : null}
+                      </button>
+                      <button className="filter-menu-item" onClick={() => setOrganizeMode('chronological')} type="button">
+                        <span>Chronological list</span>
+                        {organizeMode === 'chronological' ? <span className="filter-menu-check">✓</span> : null}
+                      </button>
+                    </div>
+                    <div className="filter-menu-divider" />
+                    <div className="filter-menu-section">
+                      <div className="filter-menu-label">Sort by</div>
+                      <button className="filter-menu-item" onClick={() => setSortMode('created')} type="button">
+                        <span>Created</span>
+                        {sortMode === 'created' ? <span className="filter-menu-check">✓</span> : null}
+                      </button>
+                      <button className="filter-menu-item" onClick={() => setSortMode('updated')} type="button">
+                        <span>Updated</span>
+                        {sortMode === 'updated' ? <span className="filter-menu-check">✓</span> : null}
+                      </button>
+                    </div>
+                    <div className="filter-menu-divider" />
+                    <div className="filter-menu-section">
+                      <div className="filter-menu-label">Show</div>
+                      <button className="filter-menu-item" onClick={() => setScopeMode('all')} type="button">
+                        <span>All threads</span>
+                        {scopeMode === 'all' ? <span className="filter-menu-check">✓</span> : null}
+                      </button>
+                      <button className="filter-menu-item" onClick={() => setScopeMode('relevant')} type="button">
+                        <span>Relevant</span>
+                        {scopeMode === 'relevant' ? <span className="filter-menu-check">✓</span> : null}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            {visibleProjects.length === 0 ? <div className="sidebar-empty">No projects yet.</div> : null}
+            {organizeMode === 'chronological'
+              ? chronologicalThreads.map(({ projectPath, thread }) => (
+                  <button
+                    key={thread.id}
+                    className={`chat-list-item ${thread.id === threadId ? 'chat-list-item-active' : ''}`}
+                    onClick={() => void openThread(projectPath, thread.id)}
+                    type="button"
+                  >
+                    <div className="chat-list-title-row">
+                      <span className="chat-list-title-wrap">
+                        {thread.id === threadId && isTurnActive ? <LoaderDot /> : null}
+                        <span className="chat-list-title">{thread.preview?.trim() || 'New chat'}</span>
+                      </span>
+                      <span className="chat-list-time">{formatUpdatedAt(sortMode === 'created' ? thread.createdAt : thread.updatedAt)}</span>
+                    </div>
+                  </button>
+                ))
+              : visibleProjects.map((projectPath) => {
               const projectName = formatWorkspaceName(projectPath);
-              const threads = projectThreads[projectPath] ?? [];
+              const threads = [...(projectThreads[projectPath] ?? [])].sort((left, right) =>
+                sortMode === 'created' ? right.createdAt - left.createdAt : right.updatedAt - left.updatedAt,
+              );
               const isActiveProject = projectPath === workspacePath;
               const isLoadingProject = loadingProjects[projectPath] ?? false;
               const isCollapsed = collapsedProjects[projectPath] ?? false;
@@ -1140,11 +1500,6 @@ export default function App() {
 
                   <div className={`project-thread-list ${isCollapsed ? 'project-thread-list-collapsed' : ''}`}>
                     {isLoadingProject ? <div className="sidebar-empty">Loading chats...</div> : null}
-                    {!isLoadingProject && threads.length === 0 ? (
-                      <div className="sidebar-empty">
-                        {isActiveProject ? 'No chats for this project yet.' : 'No chats yet.'}
-                      </div>
-                    ) : null}
                     {threads.map((thread) => (
                       <button
                         key={thread.id}
@@ -1153,16 +1508,29 @@ export default function App() {
                         type="button"
                       >
                         <div className="chat-list-title-row">
-                          <span className="chat-list-title">{formatThreadName(thread)}</span>
-                          <span className="chat-list-time">{formatUpdatedAt(thread.updatedAt)}</span>
+                          <span className="chat-list-title-wrap">
+                            {thread.id === threadId && isTurnActive ? <LoaderDot /> : null}
+                            <span className="chat-list-title">{thread.preview?.trim() || 'New chat'}</span>
+                          </span>
+                          <span className="chat-list-time">{formatUpdatedAt(sortMode === 'created' ? thread.createdAt : thread.updatedAt)}</span>
                         </div>
-                        <div className="chat-list-preview">{thread.preview?.trim() || 'New chat'}</div>
                       </button>
                     ))}
                   </div>
                 </div>
               );
             })}
+          </div>
+
+          <div className="sidebar-footer">
+            <button className="sidebar-nav-item" onClick={handleChangeAgent} type="button">
+              <LuSparkles aria-hidden="true" size={16} />
+              <span>Change agent</span>
+            </button>
+            <button className="sidebar-nav-item" type="button">
+              <LuSettings2 aria-hidden="true" size={16} />
+              <span>Settings</span>
+            </button>
           </div>
 
         </aside>
@@ -1180,9 +1548,8 @@ export default function App() {
                 <SidebarToggleIcon open={sidebarOpen} />
               </button>
               <div className="topbar-heading">
-                <div className="topbar-title-row">
-                  <div className="topbar-title">{currentThreadName}</div>
-                  {workspacePath ? <div className="topbar-project-badge">{formatWorkspaceName(workspacePath)}</div> : null}
+                <div className="topbar-title-group">
+                  <div className="topbar-title" title={currentThreadName}>{displayThreadName}</div>
                 </div>
               </div>
             </div>
@@ -1214,7 +1581,7 @@ export default function App() {
 
               {!connecting && !errorMessage && transcriptEntries.length === 0 ? (
                 <div className="empty-state">
-                  <h1>What should the agent work on?</h1>
+                  <h1>What should {selectedAgentLabel} work on?</h1>
                   <p className="empty-sub">{workspacePath ? formatWorkspaceName(workspacePath) : 'Choose a project to begin.'}</p>
                 </div>
               ) : null}
@@ -1233,12 +1600,27 @@ export default function App() {
 
           <footer className="composer">
             <form className="composer-form" onSubmit={(event) => void submitTurn(event)}>
+              {composerImages.length > 0 ? (
+                <div className="composer-image-strip">
+                  {composerImages.map((image) => (
+                    <div className="composer-image-chip" key={image.id}>
+                      <button className="user-image-button" onClick={() => setSelectedComposerImage(image.url)} type="button">
+                        <img alt="Pending upload" className="user-message-image" src={image.url} />
+                      </button>
+                      <button className="composer-image-remove" onClick={() => removeComposerImage(image.id)} type="button">
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <textarea
                 className="composer-input"
                 disabled={!threadId || connecting}
                 onChange={(event) => handleDraftChange(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
-                placeholder={threadId ? 'Message the agent...' : 'Waiting for connection...'}
+                onPaste={handleComposerPaste}
+                placeholder={threadId ? `Message ${selectedAgentLabel}...` : 'Waiting for connection...'}
                 ref={composerRef}
                 rows={1}
                 value={draft}
@@ -1246,12 +1628,16 @@ export default function App() {
 
               <div className="composer-bar">
                 <div className="composer-bar-left">
+                  <button className="composer-icon-btn" type="button">
+                    <LuPlus aria-hidden="true" size={17} />
+                  </button>
                   {models.length > 0 ? (
-                    <select
-                      className="model-select"
-                      onChange={(event) => {
-                        const nextModel = event.target.value || null;
+                    <PickerMenu
+                      label="Select model"
+                      menuRef={modelMenuRef}
+                      onSelect={(nextModel) => {
                         setSelectedModel(nextModel);
+                        setModelMenuOpen(false);
 
                         const nextModelData = models.find((model) => model.model === nextModel) ?? null;
                         const nextEfforts = EFFORT_PRIORITY.filter((effort) =>
@@ -1260,46 +1646,53 @@ export default function App() {
 
                         setSelectedEffort(nextEfforts.length ? nextModelData?.defaultReasoningEffort ?? nextEfforts[0] : null);
                       }}
-                      value={selectedModel && models.some((model) => model.model === selectedModel) ? selectedModel : ''}
-                    >
-                      {models.map((model) => (
-                        <option key={model.id} value={model.model}>
-                          {model.displayName}
-                        </option>
-                      ))}
-                    </select>
+                      onToggle={() => {
+                        setEffortMenuOpen(false);
+                        setModelMenuOpen((value) => !value);
+                      }}
+                      open={modelMenuOpen}
+                      options={models.map((model) => ({ value: model.model, label: model.displayName }))}
+                      value={(selectedModel && models.some((model) => model.model === selectedModel) ? selectedModel : models[0]?.model) ?? ''}
+                    />
                   ) : null}
 
                   {effortOptions.length > 0 ? (
-                    <select
-                      className="model-select"
-                      onChange={(event) => setSelectedEffort((event.target.value as ReasoningEffort) || null)}
-                      value={selectedEffort ?? ''}
-                    >
-                      {effortOptions.map((effort) => (
-                        <option key={effort} value={effort}>
-                          {humanizeEffort(effort)} effort
-                        </option>
-                      ))}
-                    </select>
+                    <PickerMenu
+                      label="Select effort"
+                      menuRef={effortMenuRef}
+                      onSelect={(effort) => {
+                        setSelectedEffort(effort);
+                        setEffortMenuOpen(false);
+                      }}
+                      onToggle={() => {
+                        setModelMenuOpen(false);
+                        setEffortMenuOpen((value) => !value);
+                      }}
+                      open={effortMenuOpen}
+                      options={effortOptions.map((effort) => ({ value: effort, label: `${humanizeEffort(effort)} effort` }))}
+                      value={selectedEffort ?? effortOptions[0]}
+                    />
                   ) : null}
                 </div>
 
                 <div className="composer-bar-right">
                   {currentTurnId ? (
-                    <button className="btn btn-sm btn-danger" onClick={() => void interruptTurn()} type="button">
+                    <button className="composer-stop-btn" onClick={() => void interruptTurn()} type="button">
                       Stop
                     </button>
                   ) : null}
 
                   <button className="btn btn-send" disabled={!canSubmit} type="submit">
-                    <svg fill="none" height="16" viewBox="0 0 16 16" width="16">
-                      <path d="M3 13V9L8 8L3 7V3L14 8L3 13Z" fill="currentColor" />
-                    </svg>
+                    <LuArrowUp aria-hidden="true" size={16} />
                   </button>
                 </div>
               </div>
             </form>
+            {selectedComposerImage ? (
+              <button className="image-modal" onClick={() => setSelectedComposerImage(null)} type="button">
+                <img alt="Expanded pending upload" className="image-modal-content" src={selectedComposerImage} />
+              </button>
+            ) : null}
           </footer>
         </div>
       </div>
