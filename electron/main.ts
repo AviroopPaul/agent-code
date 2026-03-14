@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { CodexAppServerClient } from './codexAppServerClient';
@@ -28,13 +29,72 @@ let backendStartPromise: Promise<{ userAgent: string; codexBin: string; models: 
 let backendSnapshot: { userAgent: string; codexBin: string; models: ModelListResponse['data'] } | null = null;
 
 app.setName('Agent Code');
+app.setAboutPanelOptions({
+  applicationName: 'Agent Code',
+  applicationVersion: app.getVersion(),
+  version: app.getVersion(),
+});
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.agentcode.desktop');
+}
 
 function emitToRenderer(event: ClientEnvelope): void {
   mainWindow?.webContents.send('codex:event', event);
 }
 
+function installApplicationMenu(): void {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : [{ role: 'fileMenu' as const }]),
+    { role: 'editMenu' as const },
+    { role: 'viewMenu' as const },
+    { role: 'windowMenu' as const },
+    {
+      role: 'help' as const,
+      submenu: [
+        {
+          label: 'Agent Code',
+          enabled: false,
+        },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 function getCodexBin(): string {
   return process.env.CODEX_BIN || 'codex';
+}
+
+function spawnDetached(command: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+    });
+
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+async function openInCursor(cwd: string): Promise<void> {
+  try {
+    await spawnDetached('cursor', [cwd]);
+    return;
+  } catch {
+    if (process.platform === 'darwin') {
+      await spawnDetached('open', ['-a', 'Cursor', cwd]);
+      return;
+    }
+
+    throw new Error('Cursor is not installed or the `cursor` command is unavailable.');
+  }
 }
 
 async function startBackend(): Promise<{ userAgent: string; codexBin: string; models: ModelListResponse['data'] }> {
@@ -61,7 +121,7 @@ async function startBackend(): Promise<{ userAgent: string; codexBin: string; mo
 
     const initializeParams: InitializeParams = {
       clientInfo: {
-        name: 'codex_gui',
+        name: 'agent_code',
         title: 'Agent Code',
         version: '0.1.0',
       },
@@ -101,14 +161,18 @@ async function startBackend(): Promise<{ userAgent: string; codexBin: string; mo
 }
 
 async function createWindow(): Promise<void> {
+  const isMac = process.platform === 'darwin';
   mainWindow = new BrowserWindow({
     width: 1480,
     height: 980,
     minWidth: 1180,
     minHeight: 780,
-    backgroundColor: '#0e1411',
+    backgroundColor: isMac ? '#00000000' : '#0e1411',
     title: 'Agent Code',
     titleBarStyle: 'hiddenInset',
+    transparent: isMac,
+    vibrancy: isMac ? 'sidebar' : undefined,
+    visualEffectState: isMac ? 'active' : undefined,
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -121,6 +185,10 @@ async function createWindow(): Promise<void> {
     event.preventDefault();
     mainWindow?.setTitle('Agent Code');
   });
+
+  if (isMac) {
+    mainWindow.setVibrancy('sidebar');
+  }
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 
@@ -224,18 +292,26 @@ ipcMain.handle('codex:resume-thread', async (_event, payload: { threadId: string
   });
 });
 
-ipcMain.handle('codex:send-turn', async (_event, payload: { threadId: string; cwd: string; text: string; model?: string | null; effort?: string | null }) => {
+ipcMain.handle('codex:send-turn', async (_event, payload: { threadId: string; cwd: string; text: string; images?: string[]; model?: string | null; effort?: string | null }) => {
   return await codex.request<TurnStartResponse>('turn/start', {
     threadId: payload.threadId,
     cwd: payload.cwd,
     model: payload.model ?? null,
     effort: payload.effort ?? null,
     input: [
-      {
-        type: 'text',
-        text: payload.text,
-        text_elements: [],
-      },
+      ...(payload.images ?? []).map((url) => ({
+        type: 'image' as const,
+        url,
+      })),
+      ...(payload.text.trim()
+        ? [
+            {
+              type: 'text' as const,
+              text: payload.text,
+              text_elements: [],
+            },
+          ]
+        : []),
     ],
   });
 });
@@ -252,7 +328,12 @@ ipcMain.handle('codex:open-external', async (_event, url: string) => {
   await shell.openExternal(url);
 });
 
+ipcMain.handle('codex:open-in-cursor', async (_event, cwd: string) => {
+  await openInCursor(cwd);
+});
+
 app.whenReady().then(async () => {
+  installApplicationMenu();
   await createWindow();
 
   app.on('activate', async () => {

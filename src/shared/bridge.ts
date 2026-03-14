@@ -28,10 +28,11 @@ export type CodexBridge = {
   listThreads: (cwd: string) => Promise<ThreadListResponse>;
   readThread: (threadId: string) => Promise<ThreadReadResponse>;
   resumeThread: (threadId: string, cwd?: string | null) => Promise<ThreadResumeResponse>;
-  sendTurn: (payload: { threadId: string; cwd: string; text: string; model?: string | null; effort?: ReasoningEffort | null }) => Promise<TurnStartResponse>;
+  sendTurn: (payload: { threadId: string; cwd: string; text: string; images?: string[]; model?: string | null; effort?: ReasoningEffort | null }) => Promise<TurnStartResponse>;
   interruptTurn: (payload: { threadId: string; turnId: string }) => Promise<unknown>;
   resolveServerRequest: (payload: { id: string | number; result?: unknown; error?: { code: number; message: string; data?: unknown } }) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
+  openInCursor: (cwd: string) => Promise<void>;
   subscribe: (listener: (event: CodexBridgeEvent) => void) => () => void;
 };
 

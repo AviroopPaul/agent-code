@@ -6,6 +6,8 @@ import type { ResponseItem } from '../shared/protocol/ResponseItem';
 import type { ServerNotification } from '../shared/protocol/ServerNotification';
 import type { ServerRequest } from '../shared/protocol/ServerRequest';
 import type { ThreadItem } from '../shared/protocol/v2/ThreadItem';
+import type { AskForApproval } from '../shared/protocol/v2/AskForApproval';
+import type { SandboxPolicy } from '../shared/protocol/v2/SandboxPolicy';
 import type { ThreadReadResponse } from '../shared/protocol/v2/ThreadReadResponse';
 import type { ThreadResumeResponse } from '../shared/protocol/v2/ThreadResumeResponse';
 import type { ThreadStartResponse } from '../shared/protocol/v2/ThreadStartResponse';
@@ -43,6 +45,8 @@ type StoreState = {
   workspacePath: string;
   threadId: string | null;
   currentThreadName: string;
+  approvalPolicy: AskForApproval | null;
+  sandboxPolicy: SandboxPolicy | null;
   currentTurnId: string | null;
   turnStatus: string;
   transcriptOrder: string[];
@@ -62,6 +66,14 @@ type StoreState = {
   clearApproval: (id: string | number) => void;
   resetTranscript: () => void;
 };
+
+function shouldIncludeThreadItem(item: ThreadItem): boolean {
+  return item.type !== 'reasoning';
+}
+
+function shouldIncludeResponseItem(item: ResponseItem): boolean {
+  return item.type !== 'reasoning';
+}
 
 function ensureTranscriptEntry(
   state: StoreState,
@@ -317,6 +329,10 @@ function transcriptStateFromItems(items: ThreadItem[]): Pick<StoreState, 'transc
   const transcript: Record<string, TranscriptEntry> = {};
 
   for (const item of items) {
+    if (!shouldIncludeThreadItem(item)) {
+      continue;
+    }
+
     const entry = summarizeItem(item);
     if (!transcript[entry.id]) {
       transcriptOrder.push(entry.id);
@@ -342,6 +358,8 @@ export const useCodexStore = create<StoreState>((set) => ({
   workspacePath: '',
   threadId: null,
   currentThreadName: 'New chat',
+  approvalPolicy: null,
+  sandboxPolicy: null,
   currentTurnId: null,
   turnStatus: 'idle',
   transcriptOrder: [],
@@ -374,6 +392,8 @@ export const useCodexStore = create<StoreState>((set) => ({
       workspacePath,
       threadId: response.thread.id,
       currentThreadName: response.thread.name?.trim() || response.thread.preview?.trim() || 'New chat',
+      approvalPolicy: response.approvalPolicy,
+      sandboxPolicy: response.sandbox,
       currentTurnId: null,
       turnStatus: 'idle',
       transcriptOrder: [],
@@ -387,6 +407,8 @@ export const useCodexStore = create<StoreState>((set) => ({
       workspacePath,
       threadId: response.thread.id,
       currentThreadName: response.thread.name?.trim() || response.thread.preview?.trim() || 'New chat',
+      approvalPolicy: response.approvalPolicy,
+      sandboxPolicy: response.sandbox,
       currentTurnId: null,
       turnStatus: normalizeThreadStatus(response.thread.status),
       ...transcriptStateFromItems(response.thread.turns.flatMap((turn) => turn.items)),
@@ -418,6 +440,8 @@ export const useCodexStore = create<StoreState>((set) => ({
       currentTurnId: null,
       turnStatus: 'idle',
       currentThreadName: 'New chat',
+      approvalPolicy: null,
+      sandboxPolicy: null,
     }),
   handleBridgeEvent: (event) =>
     set((state) => {
@@ -506,6 +530,10 @@ export const useCodexStore = create<StoreState>((set) => ({
           };
         case 'item/started':
         case 'item/completed': {
+          if (!shouldIncludeThreadItem(notification.params.item)) {
+            return {};
+          }
+
           const entry = summarizeItem(notification.params.item);
           const transcript = { ...state.transcript };
           const transcriptOrder = [...state.transcriptOrder];
@@ -522,6 +550,10 @@ export const useCodexStore = create<StoreState>((set) => ({
           };
         }
         case 'rawResponseItem/completed': {
+          if (!shouldIncludeResponseItem(notification.params.item)) {
+            return {};
+          }
+
           const entry = summarizeResponseItem(
             notification.params.item,
             `raw-${notification.params.turnId}-${state.transcriptOrder.length}`,
@@ -621,63 +653,13 @@ export const useCodexStore = create<StoreState>((set) => ({
           };
         }
         case 'item/reasoning/textDelta': {
-          const transcript = { ...state.transcript };
-          const transcriptOrder = [...state.transcriptOrder];
-          const entry = ensureTranscriptEntry(
-            { ...state, transcript, transcriptOrder },
-            notification.params.itemId,
-            {
-              id: notification.params.itemId,
-              kind: 'reasoning',
-              title: 'Reasoning',
-              body: '',
-            },
-          );
-          entry.body += notification.params.delta;
-
-          return {
-            transcript,
-            transcriptOrder,
-          };
+          return {};
         }
         case 'item/reasoning/summaryTextDelta': {
-          const transcript = { ...state.transcript };
-          const transcriptOrder = [...state.transcriptOrder];
-          const entry = ensureTranscriptEntry(
-            { ...state, transcript, transcriptOrder },
-            notification.params.itemId,
-            {
-              id: notification.params.itemId,
-              kind: 'reasoning',
-              title: 'Reasoning',
-              body: '',
-            },
-          );
-          entry.body += notification.params.delta;
-
-          return {
-            transcript,
-            transcriptOrder,
-          };
+          return {};
         }
         case 'item/reasoning/summaryPartAdded': {
-          const transcript = { ...state.transcript };
-          const transcriptOrder = [...state.transcriptOrder];
-          ensureTranscriptEntry(
-            { ...state, transcript, transcriptOrder },
-            notification.params.itemId,
-            {
-              id: notification.params.itemId,
-              kind: 'reasoning',
-              title: 'Reasoning',
-              body: '',
-            },
-          );
-
-          return {
-            transcript,
-            transcriptOrder,
-          };
+          return {};
         }
         case 'serverRequest/resolved':
           return {
