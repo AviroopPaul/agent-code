@@ -20,6 +20,7 @@ export type CodexBridgeEvent =
   | { type: 'server-request'; payload: unknown };
 
 export type CodexBridge = {
+  setAgent: (agent: string) => Promise<void>;
   getCwd: () => Promise<string>;
   startBackend: () => Promise<BackendStartResponse>;
   stopBackend: () => Promise<void>;

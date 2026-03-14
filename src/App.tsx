@@ -26,11 +26,12 @@ import type { UserInput } from './shared/protocol/v2/UserInput';
 import type { ProjectThread } from './shared/bridge';
 
 const EFFORT_PRIORITY: ReasoningEffort[] = ['low', 'medium', 'high', 'xhigh'];
-const RECENT_PROJECTS_KEY = 'agent-code:recent-projects';
+const RECENT_PROJECTS_KEY = 'agent-code:recent-projects'; // codex-only; claude uses RECENT_PROJECTS_CLAUDE_KEY
+const RECENT_PROJECTS_CLAUDE_KEY = 'agent-code:recent-projects:claude';
 const SELECTED_AGENT_KEY = 'agent-code:selected-agent';
 const AGENT_OPTIONS = [
   { id: 'codex', label: 'Codex', icon: 'https://openai.com/favicon.ico', available: true },
-  { id: 'claude', label: 'Claude Code', icon: 'https://claude.com/favicon.ico', available: false },
+  { id: 'claude', label: 'Claude Code', icon: 'https://claude.com/favicon.ico', available: true },
   { id: 'gemini', label: 'Gemini CLI', icon: 'https://www.gstatic.com/marketing-cms/assets/images/7e/a4/253561a944f4a8f5e6dec4f5f26f/gemini.webp=s48-fcrop64=1,00000000ffffffff-rw', available: false },
   { id: 'opencode', label: 'Opencode', icon: 'https://opencode.ai/favicon.ico', available: false },
 ] as const;
@@ -885,7 +886,10 @@ export default function App() {
     }
 
     try {
-      const stored = window.localStorage.getItem(RECENT_PROJECTS_KEY);
+      const agentKey = window.localStorage.getItem(SELECTED_AGENT_KEY) === 'claude'
+        ? RECENT_PROJECTS_CLAUDE_KEY
+        : RECENT_PROJECTS_KEY;
+      const stored = window.localStorage.getItem(agentKey);
       return stored ? (JSON.parse(stored) as string[]) : [];
     } catch {
       return [];
@@ -1015,8 +1019,31 @@ export default function App() {
       return;
     }
 
-    window.localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recentProjects));
-  }, [recentProjects]);
+    const agentKey = selectedAgent === 'claude' ? RECENT_PROJECTS_CLAUDE_KEY : RECENT_PROJECTS_KEY;
+    window.localStorage.setItem(agentKey, JSON.stringify(recentProjects));
+  }, [recentProjects, selectedAgent]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (selectedAgent) {
+      window.localStorage.setItem(SELECTED_AGENT_KEY, selectedAgent);
+    } else {
+      window.localStorage.removeItem(SELECTED_AGENT_KEY);
+    }
+
+    // Load the correct project list for the newly selected agent
+    const agentKey = selectedAgent === 'claude' ? RECENT_PROJECTS_CLAUDE_KEY : RECENT_PROJECTS_KEY;
+    try {
+      const stored = window.localStorage.getItem(agentKey);
+      setRecentProjects(stored ? (JSON.parse(stored) as string[]) : []);
+    } catch {
+      setRecentProjects([]);
+    }
+    setProjectThreads({});
+  }, [selectedAgent]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1037,6 +1064,11 @@ export default function App() {
       if (!codex) {
         setErrorMessage('This renderer is not running inside Electron.');
       }
+      return;
+    }
+
+    if (selectedAgent !== 'codex' && selectedAgent !== 'claude') {
+      setConnecting(false);
       return;
     }
 
@@ -1084,7 +1116,7 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!codex || selectedAgent !== 'codex') {
+    if (!codex || (selectedAgent !== 'codex' && selectedAgent !== 'claude')) {
       return;
     }
 
@@ -1092,28 +1124,38 @@ export default function App() {
 
     void (async () => {
       try {
-        const cwd = await codex.getCwd();
-        if (cancelled) {
-          return;
+        if (selectedAgent === 'claude') {
+          await codex.setAgent('claude');
+          const backendResponse = await codex.startBackend();
+          if (cancelled) return;
+          startBackend(backendResponse);
+          // Load threads for all previously used Claude projects from disk
+          const stored = window.localStorage.getItem(RECENT_PROJECTS_CLAUDE_KEY);
+          const savedProjects: string[] = stored ? (JSON.parse(stored) as string[]) : [];
+          await Promise.all(savedProjects.map((p) => refreshThreads(p)));
+        } else {
+          await codex.setAgent('codex');
+          const cwd = await codex.getCwd();
+          if (cancelled) return;
+
+          setWorkspace(cwd);
+          rememberProject(cwd);
+
+          const backendResponse = await codex.startBackend();
+          if (cancelled) return;
+
+          startBackend(backendResponse);
+
+          const session = await codex.createSession(cwd);
+          if (cancelled) return;
+
+          createSession(cwd, session);
+
+          // Load threads for all recent Codex projects
+          const stored = window.localStorage.getItem(RECENT_PROJECTS_KEY);
+          const savedProjects: string[] = stored ? (JSON.parse(stored) as string[]) : [];
+          await Promise.all(savedProjects.map((p) => refreshThreads(p)));
         }
-
-        setWorkspace(cwd);
-        rememberProject(cwd);
-
-        const backendResponse = await codex.startBackend();
-        if (cancelled) {
-          return;
-        }
-
-        startBackend(backendResponse);
-
-        const session = await codex.createSession(cwd);
-        if (cancelled) {
-          return;
-        }
-
-        createSession(cwd, session);
-        await refreshThreads(cwd);
       } catch (error) {
         if (!cancelled) {
           setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -1314,7 +1356,7 @@ export default function App() {
   }
 
   function handleAgentSelect(agentId: (typeof AGENT_OPTIONS)[number]['id']): void {
-    if (agentId !== 'codex') {
+    if (agentId !== 'codex' && agentId !== 'claude') {
       return;
     }
 
@@ -1357,12 +1399,13 @@ export default function App() {
     );
   }
 
-  if (selectedAgent === 'codex' && connecting && !threadId && !errorMessage) {
+  if ((selectedAgent === 'codex' || selectedAgent === 'claude') && connecting && !threadId && !errorMessage) {
+    const agentOption = AGENT_OPTIONS.find((a) => a.id === selectedAgent) ?? AGENT_OPTIONS[0];
     return (
       <div className="agent-select-screen">
         <div className="agent-select-card agent-connecting-card">
-          <img alt="" className="agent-option-icon" src={AGENT_OPTIONS[0].icon} />
-          <h1>Connecting to Codex</h1>
+          <img alt="" className="agent-option-icon" src={agentOption.icon} />
+          <h1>Connecting to {agentOption.label}</h1>
           <div className="spinner" />
         </div>
       </div>
