@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { CodexAppServerClient } from './codexAppServerClient';
+import { ClaudeCodeClient, CLAUDE_MODELS } from './claudeCodeClient';
 
 import type { InitializeParams } from '../src/shared/protocol/InitializeParams';
 import type { InitializeResponse } from '../src/shared/protocol/InitializeResponse';
@@ -27,6 +28,9 @@ const codex = new CodexAppServerClient();
 let mainWindow: BrowserWindow | null = null;
 let backendStartPromise: Promise<{ userAgent: string; codexBin: string; models: ModelListResponse['data'] }> | null = null;
 let backendSnapshot: { userAgent: string; codexBin: string; models: ModelListResponse['data'] } | null = null;
+
+let selectedAgent: 'codex' | 'claude' = 'codex';
+let claudeCodeClient: ClaudeCodeClient | null = null;
 
 app.setName('Agent Code');
 app.setAboutPanelOptions({
@@ -98,6 +102,63 @@ async function openInCursor(cwd: string): Promise<void> {
 }
 
 async function startBackend(): Promise<{ userAgent: string; codexBin: string; models: ModelListResponse['data'] }> {
+  if (selectedAgent === 'claude') {
+    return await startClaudeBackend();
+  }
+
+  return await startCodexBackend();
+}
+
+async function startClaudeBackend(): Promise<{ userAgent: string; codexBin: string; models: ModelListResponse['data'] }> {
+  if (!claudeCodeClient) {
+    claudeCodeClient = new ClaudeCodeClient();
+
+    claudeCodeClient.on('bridgeEvent', (event) => {
+      emitToRenderer(event as ClientEnvelope);
+    });
+
+    claudeCodeClient.on('log', (message) => {
+      emitToRenderer({ type: 'backend-log', payload: { message } });
+    });
+  }
+
+  const { userAgent, claudeBin } = await claudeCodeClient.initialize();
+
+  const models = CLAUDE_MODELS.map((m) => ({
+    id: m.model,
+    model: m.model,
+    upgrade: null,
+    upgradeInfo: null,
+    availabilityNux: null,
+    displayName: m.displayName,
+    description: '',
+    hidden: false,
+    supportedReasoningEfforts: [],
+    defaultReasoningEffort: 'medium' as const,
+    inputModalities: ['text' as const],
+    supportsPersonality: false,
+    isDefault: m.isDefault,
+  }));
+
+  const result = {
+    userAgent,
+    codexBin: claudeBin,
+    models: models as ModelListResponse['data'],
+  };
+
+  emitToRenderer({
+    type: 'backend-status',
+    payload: {
+      connected: true,
+      userAgent,
+      codexBin: claudeBin,
+    },
+  });
+
+  return result;
+}
+
+async function startCodexBackend(): Promise<{ userAgent: string; codexBin: string; models: ModelListResponse['data'] }> {
   if (backendSnapshot) {
     emitToRenderer({
       type: 'backend-status',
@@ -226,6 +287,16 @@ codex.on('exit', ({ code, signal }) => {
   });
 });
 
+ipcMain.handle('codex:set-agent', (_event, agent: string) => {
+  if (agent === 'claude' || agent === 'codex') {
+    selectedAgent = agent;
+    // Reset Claude client when switching so it re-initializes
+    if (agent !== 'claude') {
+      claudeCodeClient = null;
+    }
+  }
+});
+
 ipcMain.handle('codex:get-cwd', () => process.cwd());
 
 ipcMain.handle('codex:start-backend', async () => await startBackend());
@@ -255,6 +326,10 @@ ipcMain.handle('codex:select-workspace', async () => {
 });
 
 ipcMain.handle('codex:create-session', async (_event, cwd: string) => {
+  if (selectedAgent === 'claude' && claudeCodeClient) {
+    return await claudeCodeClient.createThread(cwd);
+  }
+
   return await codex.request<ThreadStartResponse>('thread/start', {
     cwd,
     approvalPolicy: 'untrusted',
@@ -266,6 +341,10 @@ ipcMain.handle('codex:create-session', async (_event, cwd: string) => {
 });
 
 ipcMain.handle('codex:list-threads', async (_event, cwd: string) => {
+  if (selectedAgent === 'claude' && claudeCodeClient) {
+    return await claudeCodeClient.listThreads(cwd);
+  }
+
   return await codex.request<ThreadListResponse>('thread/list', {
     cwd,
     limit: 100,
@@ -275,6 +354,10 @@ ipcMain.handle('codex:list-threads', async (_event, cwd: string) => {
 });
 
 ipcMain.handle('codex:read-thread', async (_event, threadId: string) => {
+  if (selectedAgent === 'claude' && claudeCodeClient) {
+    return await claudeCodeClient.readThread(threadId);
+  }
+
   return await codex.request<ThreadReadResponse>('thread/read', {
     threadId,
     includeTurns: true,
@@ -282,6 +365,10 @@ ipcMain.handle('codex:read-thread', async (_event, threadId: string) => {
 });
 
 ipcMain.handle('codex:resume-thread', async (_event, payload: { threadId: string; cwd?: string | null }) => {
+  if (selectedAgent === 'claude' && claudeCodeClient) {
+    return await claudeCodeClient.resumeThread(payload.threadId);
+  }
+
   return await codex.request<ThreadResumeResponse>('thread/resume', {
     threadId: payload.threadId,
     cwd: payload.cwd ?? null,
@@ -293,6 +380,15 @@ ipcMain.handle('codex:resume-thread', async (_event, payload: { threadId: string
 });
 
 ipcMain.handle('codex:send-turn', async (_event, payload: { threadId: string; cwd: string; text: string; images?: string[]; model?: string | null; effort?: string | null }) => {
+  if (selectedAgent === 'claude' && claudeCodeClient) {
+    return await claudeCodeClient.sendTurn(payload.text, {
+      cwd: payload.cwd,
+      threadId: payload.threadId,
+      model: payload.model ?? null,
+    });
+  }
+
+
   return await codex.request<TurnStartResponse>('turn/start', {
     threadId: payload.threadId,
     cwd: payload.cwd,
@@ -317,6 +413,11 @@ ipcMain.handle('codex:send-turn', async (_event, payload: { threadId: string; cw
 });
 
 ipcMain.handle('codex:interrupt-turn', async (_event, payload: { threadId: string; turnId: string }) => {
+  if (selectedAgent === 'claude' && claudeCodeClient) {
+    claudeCodeClient.interrupt();
+    return {};
+  }
+
   return await codex.request<TurnInterruptResponse>('turn/interrupt', payload);
 });
 

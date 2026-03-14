@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const api = {
+  setAgent: async (agent: string) => await ipcRenderer.invoke('codex:set-agent', agent),
   getCwd: async () => await ipcRenderer.invoke('codex:get-cwd') as string,
   startBackend: async () => await ipcRenderer.invoke('codex:start-backend'),
   stopBackend: async () => await ipcRenderer.invoke('codex:stop-backend'),
