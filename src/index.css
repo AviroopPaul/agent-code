@@ -1,5 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&display=swap');
+
 :root {
   --font: "SF Pro Display", "Avenir Next", "Helvetica Neue", sans-serif;
+  --font-brand: "Space Grotesk", "SF Pro Display", "Avenir Next", sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
   --bg: #111111;
   --bg-elevated: rgba(255, 255, 255, 0.04);
@@ -147,6 +150,16 @@ pre {
   flex: 1;
 }
 
+.sidebar-brand {
+  font-family: var(--font-brand);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  padding: 0 4px;
+  margin-top: -8px;
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -200,8 +213,8 @@ pre {
 }
 
 .sidebar-icon-btn {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -328,24 +341,30 @@ pre {
 }
 
 .project-new-chat {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: 6px;
   padding: 0;
   color: var(--text-muted);
   background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .project-new-chat:hover,
 .project-new-chat-active {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text);
 }
 
 .project-new-chat-glyph {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .project-thread-list {
@@ -561,16 +580,21 @@ pre {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .messages-inner {
   width: min(100%, 1120px);
   margin: 0 auto;
-  padding: 18px 34px 20px;
+  padding: 18px 34px 48px;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .empty-state {
-  min-height: 300px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -914,7 +938,7 @@ pre {
 }
 
 .composer {
-  padding: 0 28px 16px;
+  padding: 16px 28px 16px;
 }
 
 .composer-form {
@@ -1065,8 +1089,8 @@ pre {
 }
 
 .btn-send {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border: none;
   border-radius: 999px;
   display: inline-flex;
@@ -1272,7 +1296,7 @@ pre {
   }
 
   .composer {
-    padding: 0 12px 12px;
+    padding: 12px 12px 12px;
   }
 
   .footer-status-row {

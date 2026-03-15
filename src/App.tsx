@@ -7,7 +7,6 @@ import {
   LuFolderPlus,
   LuPanelLeftClose,
   LuPanelLeftOpen,
-  LuPlus,
   LuSparkles,
   LuSettings2,
   LuSlidersHorizontal,
@@ -917,6 +916,8 @@ export default function App() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [effortMenuOpen, setEffortMenuOpen] = useState(false);
+  const [autoAcceptMenuOpen, setAutoAcceptMenuOpen] = useState(false);
+  const [autoAccept, setAutoAccept] = useState(false);
   const [organizeMode, setOrganizeMode] = useState<ThreadOrganizeMode>('byProject');
   const [sortMode, setSortMode] = useState<ThreadSortMode>('updated');
   const [scopeMode, setScopeMode] = useState<ThreadScopeMode>('all');
@@ -926,6 +927,7 @@ export default function App() {
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const effortMenuRef = useRef<HTMLDivElement | null>(null);
+  const autoAcceptMenuRef = useRef<HTMLDivElement | null>(null);
 
   const codex = typeof window !== 'undefined' ? window.codex : undefined;
 
@@ -980,7 +982,7 @@ export default function App() {
   }, [transcriptEntries.length, approvals.length, isTurnActive]);
 
   useEffect(() => {
-    if (!filtersOpen && !modelMenuOpen && !effortMenuOpen) {
+    if (!filtersOpen && !modelMenuOpen && !effortMenuOpen && !autoAcceptMenuOpen) {
       return;
     }
 
@@ -995,11 +997,25 @@ export default function App() {
       if (!effortMenuRef.current?.contains(target)) {
         setEffortMenuOpen(false);
       }
+      if (!autoAcceptMenuRef.current?.contains(target)) {
+        setAutoAcceptMenuOpen(false);
+      }
     }
 
     window.addEventListener('mousedown', handlePointerDown);
     return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [effortMenuOpen, filtersOpen, modelMenuOpen]);
+  }, [effortMenuOpen, filtersOpen, modelMenuOpen, autoAcceptMenuOpen]);
+
+  useEffect(() => {
+    if (!autoAccept || approvals.length === 0) return;
+    for (const approval of approvals) {
+      if (approval.method === 'item/permissions/requestApproval') {
+        void resolveApproval(approval.id, { permissions: approval.params.permissions, scope: 'session' });
+      } else {
+        void resolveApproval(approval.id, { decision: 'accept' });
+      }
+    }
+  }, [autoAccept, approvals, resolveApproval]);
 
   useEffect(() => {
     if (!effortOptions.length) {
@@ -1059,11 +1075,9 @@ export default function App() {
   }, [selectedAgent]);
 
   useEffect(() => {
-    if (!codex || selectedAgent !== 'codex') {
+    if (!codex) {
       setConnecting(false);
-      if (!codex) {
-        setErrorMessage('This renderer is not running inside Electron.');
-      }
+      setErrorMessage('This renderer is not running inside Electron.');
       return;
     }
 
@@ -1420,6 +1434,8 @@ export default function App() {
             <div className="sidebar-header-spacer" />
           </div>
 
+          <div className="sidebar-brand">Agent Code</div>
+
           <div className="sidebar-nav">
             <button
               className="sidebar-nav-item"
@@ -1437,10 +1453,10 @@ export default function App() {
               <div className="sidebar-section-label">Threads</div>
               <div className="sidebar-section-tools" ref={filterMenuRef}>
                 <button className="sidebar-icon-btn" disabled={connecting} onClick={() => void chooseWorkspace()} title="Add project" type="button">
-                  <LuFolderPlus aria-hidden="true" size={15} />
+                  <LuFolderPlus aria-hidden="true" size={16} />
                 </button>
                 <button className={`sidebar-icon-btn ${filtersOpen ? 'sidebar-icon-btn-active' : ''}`} onClick={() => setFiltersOpen((value) => !value)} title="Filter threads" type="button">
-                  <LuSlidersHorizontal aria-hidden="true" size={15} />
+                  <LuSlidersHorizontal aria-hidden="true" size={16} />
                 </button>
                 {filtersOpen ? (
                   <div className="filter-menu">
@@ -1598,12 +1614,6 @@ export default function App() {
             </div>
 
             <div className="topbar-right">
-              {!connecting && turnStatus !== 'idle' ? (
-                <div className="status-badge status-online">
-                  <span className="status-dot-inline" />
-                  {turnStatus}
-                </div>
-              ) : null}
             </div>
           </header>
 
@@ -1671,9 +1681,6 @@ export default function App() {
 
               <div className="composer-bar">
                 <div className="composer-bar-left">
-                  <button className="composer-icon-btn" type="button">
-                    <LuPlus aria-hidden="true" size={17} />
-                  </button>
                   {models.length > 0 ? (
                     <PickerMenu
                       label="Select model"
@@ -1716,6 +1723,26 @@ export default function App() {
                       value={selectedEffort ?? effortOptions[0]}
                     />
                   ) : null}
+
+                  <PickerMenu
+                    label="Accept edits"
+                    menuRef={autoAcceptMenuRef}
+                    onSelect={(value) => {
+                      setAutoAccept(value === 'on');
+                      setAutoAcceptMenuOpen(false);
+                    }}
+                    onToggle={() => {
+                      setModelMenuOpen(false);
+                      setEffortMenuOpen(false);
+                      setAutoAcceptMenuOpen((value) => !value);
+                    }}
+                    open={autoAcceptMenuOpen}
+                    options={[
+                      { value: 'off', label: 'Accept edits: Off' },
+                      { value: 'on', label: 'Accept edits: On' },
+                    ]}
+                    value={autoAccept ? 'on' : 'off'}
+                  />
                 </div>
 
                 <div className="composer-bar-right">
@@ -1726,7 +1753,7 @@ export default function App() {
                   ) : null}
 
                   <button className="btn btn-send" disabled={!canSubmit} type="submit">
-                    <LuArrowUp aria-hidden="true" size={16} />
+                    <LuArrowUp aria-hidden="true" size={20} />
                   </button>
                 </div>
               </div>
