@@ -860,6 +860,11 @@ function ThinkingRow() {
   );
 }
 
+function isThreadInFlight(threadStates: Record<string, import('./store/useCodexStore').PerThreadState>, threadId: string): boolean {
+  const ts = threadStates[threadId];
+  return (ts?.currentTurnId ?? null) !== null && ts?.turnStatus !== 'completed';
+}
+
 export default function App() {
   const models = useCodexStore((state) => state.models);
   const selectedModel = useCodexStore((state) => state.selectedModel);
@@ -871,6 +876,7 @@ export default function App() {
   const activeThreadState = useCodexStore((state) =>
     state.threadId ? (state.threadStates[state.threadId] ?? EMPTY_THREAD_STATE) : EMPTY_THREAD_STATE,
   );
+  const threadStates = useCodexStore((state) => state.threadStates);
   const currentThreadName = activeThreadState.threadName;
   const currentTurnId = activeThreadState.currentTurnId;
   const turnStatus = activeThreadState.turnStatus;
@@ -1532,7 +1538,7 @@ export default function App() {
                   >
                     <div className="chat-list-title-row">
                       <span className="chat-list-title-wrap">
-                        {thread.id === threadId && isTurnActive ? <LoaderDot /> : null}
+                        {isThreadInFlight(threadStates, thread.id) ? <LoaderDot /> : null}
                         <span className="chat-list-title">{thread.preview?.trim() || 'New chat'}</span>
                       </span>
                       <span className="chat-list-time">{formatUpdatedAt(sortMode === 'created' ? thread.createdAt : thread.updatedAt)}</span>
@@ -1590,7 +1596,7 @@ export default function App() {
                       >
                         <div className="chat-list-title-row">
                           <span className="chat-list-title-wrap">
-                            {thread.id === threadId && isTurnActive ? <LoaderDot /> : null}
+                            {isThreadInFlight(threadStates, thread.id) ? <LoaderDot /> : null}
                             <span className="chat-list-title">{thread.preview?.trim() || 'New chat'}</span>
                           </span>
                           <span className="chat-list-time">{formatUpdatedAt(sortMode === 'created' ? thread.createdAt : thread.updatedAt)}</span>
