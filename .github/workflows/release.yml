@@ -23,7 +23,7 @@ jobs:
         run: npm ci
 
       - name: Build and package
-        run: npm run dist:mac
+        run: npm run dist:mac -- --publish never
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
