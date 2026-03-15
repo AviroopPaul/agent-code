@@ -190,6 +190,7 @@ pre {
   flex-direction: column;
   min-height: 0;
   flex: 1;
+  overflow-y: auto;
 }
 
 .sidebar-section-row {
@@ -912,6 +913,17 @@ pre {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.thinking-row {
+  margin-top: 8px;
+  margin-bottom: 24px;
+  animation: fadeIn 0.25s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .thinking {

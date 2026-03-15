@@ -840,8 +840,17 @@ function TranscriptRow({ entry }: { entry: TranscriptEntry }) {
 }
 
 function ThinkingRow() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setVisible(true), 600);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!visible) return null;
+
   return (
-    <div className="msg msg-ai">
+    <div className="msg msg-ai thinking-row">
       <div className="thinking">
         <span className="thinking-dot" />
         <span className="thinking-dot" />
