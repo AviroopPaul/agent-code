@@ -1290,7 +1290,15 @@ export default function App() {
     }
 
     resumeSession(projectPath, await codex.resumeThread(nextThreadId, projectPath));
-    await syncThreadHistory(nextThreadId);
+
+    // Don't overwrite the live transcript for threads that are actively processing.
+    // resumeSession already preserved the in-flight turn state; syncThreadHistory
+    // would clobber it with stale history from disk.
+    const threadState = useCodexStore.getState().threadStates[nextThreadId];
+    const isInFlight = (threadState?.currentTurnId ?? null) !== null && threadState?.turnStatus !== 'completed';
+    if (!isInFlight) {
+      await syncThreadHistory(nextThreadId);
+    }
   }
 
   async function startNewChatForProject(projectPath: string): Promise<void> {

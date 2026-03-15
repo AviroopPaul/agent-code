@@ -281,7 +281,13 @@ export const useCodexStore = create<StoreState>((set) => ({
   resumeSession: (workspacePath, response) =>
     set((state) => {
       const tid = response.thread.id;
-      const name = response.thread.name?.trim() || response.thread.preview?.trim() || 'New chat';
+      const existing = getThread(state.threadStates, tid);
+      const name = response.thread.name?.trim() || response.thread.preview?.trim() || existing.threadName || 'New chat';
+
+      // If this thread is already in-flight (e.g. user switched away and back),
+      // preserve the live turn state so the loading indicator keeps showing.
+      const isInFlight = existing.currentTurnId !== null && existing.turnStatus !== 'completed';
+
       return {
         workspacePath,
         threadId: tid,
@@ -289,12 +295,15 @@ export const useCodexStore = create<StoreState>((set) => ({
         sandboxPolicy: response.sandbox,
         logs: [],
         threadStates: patchThread(state.threadStates, tid, {
-          ...transcriptFromItems(response.thread.turns.flatMap((t) => t.items)),
-          currentTurnId: null,
-          turnStatus: normalizeThreadStatus(response.thread.status),
-          latestDiff: '',
-          approvals: [],
           threadName: name,
+          // Only overwrite transcript/turn state for idle threads
+          ...(!isInFlight && {
+            ...transcriptFromItems(response.thread.turns.flatMap((t) => t.items)),
+            currentTurnId: null,
+            turnStatus: normalizeThreadStatus(response.thread.status),
+            latestDiff: '',
+            approvals: [],
+          }),
         }),
       };
     }),
