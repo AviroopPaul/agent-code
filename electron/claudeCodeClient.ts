@@ -68,12 +68,14 @@ type JSONLEntry = {
   };
 };
 
-function extractTextFromContent(content: JSONLEntry['message']['content']): string {
+type JSONLContent = NonNullable<NonNullable<JSONLEntry['message']>['content']>;
+
+function extractTextFromContent(content: JSONLContent): string {
   if (!content) return '';
   if (typeof content === 'string') return content;
   return content
-    .filter((c) => c.type === 'text' && c.text)
-    .map((c) => c.text ?? '')
+    .filter((c: { type: string; text?: string }) => c.type === 'text' && c.text)
+    .map((c: { type: string; text?: string }) => c.text ?? '')
     .join('\n');
 }
 
@@ -94,7 +96,7 @@ async function readSessionMeta(
       try {
         const entry = JSON.parse(line) as JSONLEntry;
         if (entry.type === 'user' && entry.message) {
-          const text = extractTextFromContent(entry.message.content);
+          const text = extractTextFromContent(entry.message.content ?? '');
           if (text.trim()) {
             preview = text.slice(0, 80);
             if (entry.timestamp) {
@@ -516,7 +518,7 @@ export class ClaudeCodeClient extends TypedEmitter {
       cwd,
       env: enrichedEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
-    }) as ChildProcessWithoutNullStreams;
+    }) as unknown as ChildProcessWithoutNullStreams;
 
     this.currentProcess = child;
 
