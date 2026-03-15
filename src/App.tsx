@@ -841,16 +841,23 @@ function TranscriptRow({ entry }: { entry: TranscriptEntry }) {
 
 function ThinkingRow() {
   const [visible, setVisible] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setVisible(true), 600);
     return () => clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (visible) {
+      rowRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [visible]);
+
   if (!visible) return null;
 
   return (
-    <div className="msg msg-ai thinking-row">
+    <div ref={rowRef} className="msg msg-ai thinking-row">
       <div className="thinking">
         <span className="thinking-dot" />
         <span className="thinking-dot" />
