@@ -15,7 +15,7 @@ import {
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-import { useCodexStore, type PendingApproval, type TranscriptEntry } from './store/useCodexStore';
+import { useCodexStore, EMPTY_THREAD_STATE, type PendingApproval, type TranscriptEntry } from './store/useCodexStore';
 
 import type { ReasoningEffort } from './shared/protocol/ReasoningEffort';
 import type { ResponseItem } from './shared/protocol/ResponseItem';
@@ -857,12 +857,18 @@ export default function App() {
   const selectedEffort = useCodexStore((state) => state.selectedEffort);
   const workspacePath = useCodexStore((state) => state.workspacePath);
   const threadId = useCodexStore((state) => state.threadId);
-  const currentThreadName = useCodexStore((state) => state.currentThreadName);
-  const currentTurnId = useCodexStore((state) => state.currentTurnId);
-  const turnStatus = useCodexStore((state) => state.turnStatus);
-  const transcriptOrder = useCodexStore((state) => state.transcriptOrder);
-  const transcript = useCodexStore((state) => state.transcript);
-  const approvals = useCodexStore((state) => state.approvals);
+
+  // Per-thread state — derived from the active thread's bucket
+  const activeThreadState = useCodexStore((state) =>
+    state.threadId ? (state.threadStates[state.threadId] ?? EMPTY_THREAD_STATE) : EMPTY_THREAD_STATE,
+  );
+  const currentThreadName = activeThreadState.threadName;
+  const currentTurnId = activeThreadState.currentTurnId;
+  const turnStatus = activeThreadState.turnStatus;
+  const transcriptOrder = activeThreadState.transcriptOrder;
+  const transcript = activeThreadState.transcript;
+  const approvals = activeThreadState.approvals;
+
   const setWorkspace = useCodexStore((state) => state.setWorkspace);
   const setSelectedModel = useCodexStore((state) => state.setSelectedModel);
   const setSelectedEffort = useCodexStore((state) => state.setSelectedEffort);
@@ -873,7 +879,7 @@ export default function App() {
   const replaceTranscript = useCodexStore((state) => state.replaceTranscript);
   const beginTurn = useCodexStore((state) => state.beginTurn);
   const clearApproval = useCodexStore((state) => state.clearApproval);
-  const resetTranscript = useCodexStore((state) => state.resetTranscript);
+  const resetThread = useCodexStore((state) => state.resetThread);
 
   const [draft, setDraft] = useState('');
   const [connecting, setConnecting] = useState(true);
@@ -1123,7 +1129,7 @@ export default function App() {
     }
 
     try {
-      replaceTranscript(await codex.readThread(nextThreadId));
+      replaceTranscript(nextThreadId, await codex.readThread(nextThreadId));
     } catch {
       // Newly created threads can fail includeTurns until the first user message exists.
     }
@@ -1230,7 +1236,7 @@ export default function App() {
         effort: effortOptions.length ? selectedEffort : null,
       });
 
-      beginTurn(response);
+      beginTurn(threadId, response);
     } catch {
       setDraft(nextDraft);
       setComposerImages(nextImages);
@@ -1253,7 +1259,7 @@ export default function App() {
     }
 
     await codex.resolveServerRequest({ id, result });
-    clearApproval(id);
+    if (threadId) clearApproval(threadId, id);
   }
 
   async function chooseWorkspace(): Promise<void> {
@@ -1297,7 +1303,6 @@ export default function App() {
       rememberProject(projectPath);
     }
 
-    resetTranscript();
     createSession(projectPath, await codex.createSession(projectPath));
     await refreshThreads(projectPath);
   }
@@ -1385,7 +1390,7 @@ export default function App() {
     setErrorMessage(null);
     setDraft('');
     setComposerImages([]);
-    resetTranscript();
+    if (threadId) resetThread(threadId);
   }
 
   if (!selectedAgent) {
